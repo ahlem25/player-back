@@ -61,7 +61,10 @@ class PlayerController extends AbstractController
     public function createPlayer(Request $request): JsonResponse
     {
         try {
-            $player = $this->serializer->deserialize($request->getContent(), Player::class, 'json');
+            $contentType = $request->headers->get('Content-Type');
+            $format = str_contains($contentType, 'application/ld+json') ? 'jsonld' : 'json';
+            
+            $player = $this->serializer->deserialize($request->getContent(), Player::class, $format);
             
             $errors = $this->validator->validate($player);
             if (count($errors) > 0) {
@@ -69,7 +72,7 @@ class PlayerController extends AbstractController
             }
             
             $player = $this->playerService->createPlayer($player);
-            $jsonPlayer = $this->serializer->serialize($player, 'json');
+            $jsonPlayer = $this->serializer->serialize($player, $format);
             
             return new JsonResponse($jsonPlayer, Response::HTTP_CREATED, [], true);
         } catch (\Exception $e) {
@@ -86,7 +89,10 @@ class PlayerController extends AbstractController
             return new JsonResponse(['message' => 'Player not found'], Response::HTTP_NOT_FOUND);
         }
     
-        $updatedPlayer = $this->serializer->deserialize($request->getContent(), Player::class, 'json');
+        $contentType = $request->headers->get('Content-Type');
+        $format = str_contains($contentType, 'application/ld+json') ? 'jsonld' : 'json';
+        
+        $updatedPlayer = $this->serializer->deserialize($request->getContent(), Player::class, $format);
 
         $player->setFirstName($updatedPlayer->getFirstName());
         $player->setLastName($updatedPlayer->getLastName());
@@ -100,7 +106,7 @@ class PlayerController extends AbstractController
         }
     
         $player = $this->playerService->updatePlayer($player);
-        $jsonPlayer = $this->serializer->serialize($player, 'json');
+        $jsonPlayer = $this->serializer->serialize($player, $format);
         
         return new JsonResponse($jsonPlayer, Response::HTTP_OK, [], true);
     }
@@ -122,55 +128,40 @@ class PlayerController extends AbstractController
     #[Route('/players/import', name: 'player_import', methods: ['POST'])]
     public function import(Request $request): JsonResponse
     {
-        /** @var UploadedFile|null $file */
         $file = $request->files->get('file');
     
         if (!$file) {
-            return new JsonResponse([
-                'success' => false,
-                'message' => 'No file uploaded'
-            ], Response::HTTP_BAD_REQUEST);
+            return $this->createErrorResponse('Aucun fichier n\'a été téléchargé', Response::HTTP_BAD_REQUEST);
         }
     
         if ($file->getClientMimeType() !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-            return new JsonResponse([
-                'success' => false,
-                'message' => 'Invalid file type. Please upload an XLSX file'
-            ], Response::HTTP_BAD_REQUEST);
+            return $this->createErrorResponse('Type de fichier invalide. Veuillez télécharger un fichier XLSX', Response::HTTP_BAD_REQUEST);
         }
     
         try {
             $persistInDatabase = filter_var($request->query->get('persistInDatabase', 'false'), FILTER_VALIDATE_BOOLEAN);
             $result = $this->playerService->importPlayersFromXlsx($file, $persistInDatabase);
-            $importedCount = $result['importedCount'];
-            $notImportedCount = $result['notImportedCount'];
-            $totalRows = $result['totalRows'];
-            $notImportedDetails = [];
-            foreach ($result['notImportedPlayers'] as $player) {
-                $notImportedDetails[] = [
-                    'row' => $player['row'],
-                    'data' => array_values($player['data']), 
-                    'error' => $player['error']
-                ];
-            }
             
-            return new JsonResponse([
-                'success' => true,
-                'message' => $persistInDatabase 
-                    ? "Import terminé: {$importedCount} joueurs importés, {$notImportedCount} joueurs rejetés sur {$totalRows} lignes traitées" 
-                    : "Validation terminée: {$importedCount} joueurs valides, {$notImportedCount} joueurs invalides sur {$totalRows} lignes analysées",
-                'importedCount' => $importedCount,
-                'notImportedCount' => $notImportedCount,
-                'totalRows' => $totalRows,
-                'notImportedPlayers' => $notImportedDetails
-            ], Response::HTTP_OK);
+            return new JsonResponse($result, Response::HTTP_OK);
         } catch (\Exception $e) {
-            return new JsonResponse([
-                'success' => false,
-                'message' => 'Error during import',
-                'error' => $e->getMessage()
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            return $this->createErrorResponse(
+                'Une erreur est survenue lors de l\'importation : ' . $e->getMessage(),
+                Response::HTTP_INTERNAL_SERVER_ERROR
+            );
         }
     }
     
+    /**
+     *
+     * @param string 
+     * @param int 
+     * @return JsonResponse 
+     */
+    private function createErrorResponse(string $message, int $statusCode): JsonResponse
+    {
+        return new JsonResponse([
+            'success' => false,
+            'message' => $message
+        ], $statusCode);
+    }
 }  

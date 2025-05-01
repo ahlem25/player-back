@@ -44,6 +44,11 @@ php bin/console doctrine:database:create
 php bin/console doctrine:migrations:migrate
 ```
 
+6. Generation de la clé public et privée ([LexikJWTAuthenticationBundle](https://github.com/lexik/LexikJWTAuthenticationBundle/blob/3.x/Resources/doc/index.rst#installation/))
+```bash
+php bin/console lexik:jwt:generate-keypair
+```
+
 ## Création d'utilisateurs via la ligne de commande
 
 Pour créer un utilisateur administrateur, utilisez la commande suivante :
@@ -102,5 +107,37 @@ Pour importer des joueurs depuis un fichier Excel (.xlsx), utilisez l'endpoint `
 Options d'importation :
 - `persistInDatabase=true` - Enregistrer les joueurs valides en base de données
 - `persistInDatabase=false` - Valider seulement sans enregistrer (comportement par défaut)
+
+## Screenshots
+
+Voici quelques captures d'écran des fonctionnalités de l'API:
+
+### Authentification
+
+![API Login](./screenshots/api-login.png)
+
+### Liste des joueurs
+
+![API Liste](./screenshots/api-liste.png)
+
+### Détails d'un joueur
+
+![API Detail](./screenshots/api-detail.png)
+
+### Création d'un joueur
+
+![API Create](./screenshots/api-create.png)
+
+### Mise à jour d'un joueur
+
+![API Update](./screenshots/api-update.png)
+
+### Suppression d'un joueur
+
+![API Delete](./screenshots/api-delete.png)
+
+### Importation de joueurs via Excel
+
+![API Import](./screenshots/api-import.png)
 
 

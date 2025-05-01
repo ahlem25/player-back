@@ -1,6 +1,8 @@
 <?php
 namespace App\Service;
 
+use App\DTO\ImportResultDTO;
+use App\DTO\PlayerImportDTO;
 use App\Entity\Player;
 use App\Repository\PlayerRepository;
 use Doctrine\ORM\EntityManagerInterface;
@@ -10,6 +12,8 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 class PlayerService
 {
+    private const VALID_POSITIONS = ['Attaquant', 'Défenseur', 'Gardien', 'Milieu'];
+
     private EntityManagerInterface $entityManager;
     private PlayerRepository $playerRepository;
     private ValidatorInterface $validator;
@@ -24,37 +28,53 @@ class PlayerService
         $this->validator = $validator;
     }
 
-
+    /**
+     * 
+     * @return Player[] 
+     */
     public function getAllPlayers(): array
     {
         return $this->playerRepository->findAll();
     }
 
-
+    /**
+     * 
+     * @param int 
+     * @return Player|null 
+     */
     public function getPlayer(int $id): ?Player
     {
         return $this->playerRepository->find($id);
     }
 
-
+    /**
+     * 
+     * @param Player 
+     * @return Player 
+     */
     public function createPlayer(Player $player): Player
     {
-
         $this->entityManager->persist($player);
         $this->entityManager->flush();
 
         return $player;
     }
 
-
+    /**
+     * 
+     * @param Player 
+     * @return Player 
+     */
     public function updatePlayer(Player $player): Player
     {
-
         $this->entityManager->flush();
         return $player;
     }
 
-
+    /**
+     * 
+     * @param Player 
+     */
     public function deletePlayer(Player $player): void
     {
         $this->entityManager->remove($player);
@@ -62,27 +82,20 @@ class PlayerService
     }
 
     /**
-     * @param UploadedFile 
+
+     * 
+     * @param UploadedFile
      * @param bool 
      * @return array 
      */
     public function importPlayersFromXlsx(UploadedFile $file, bool $persistInDatabase = false): array
     {
- 
-        $tempFilePath = sys_get_temp_dir() . '/' . uniqid() . '.xlsx';
-        $file->move(dirname($tempFilePath), basename($tempFilePath));
-        $spreadsheet = IOFactory::load($tempFilePath);
-        $worksheet = $spreadsheet->getActiveSheet();
-        $rows = $worksheet->toArray();
-
-        unlink($tempFilePath);
-
+        $rows = $this->loadExcelFile($file);
+        
         array_shift($rows);
 
         $importedPlayers = [];
         $notImportedPlayers = [];
-        
-        $validPositions = ['Attaquant', 'Défenseur', 'Gardien', 'Milieu'];
         
         foreach ($rows as $rowIndex => $row) {
             $rowNumber = $rowIndex + 2; 
@@ -95,56 +108,23 @@ class PlayerService
                 continue;
             }
             
-            $errors = [];
-            
-            if (empty(trim((string)$row[0]))) {
-                $errors[] = 'Le prénom ne peut pas être vide';
-            }
-            
-            if (empty(trim((string)$row[1]))) {
-                $errors[] = 'Le nom ne peut pas être vide';
-            }
-            
-            if (empty(trim((string)$row[2]))) {
-                $errors[] = 'La position ne peut pas être vide';
-            } elseif (!in_array($row[2], $validPositions)) {
-                $errors[] = 'Position invalide. Valeurs acceptées: ' . implode(', ', $validPositions);
-            }
-            
-            if (empty(trim((string)$row[3]))) {
-                $errors[] = 'L\'équipe ne peut pas être vide';
-            }
-            
-            if (empty($row[4])) {
-                $errors[] = 'L\'âge ne peut pas être vide';
-            } elseif (!is_numeric($row[4]) || $row[4] <= 0) {
-                $errors[] = 'L\'âge doit être un nombre positif';
-            }
-            
-            if (!empty($errors)) {
+            $playerDTO = new PlayerImportDTO($row, $rowNumber);
+            $validationErrors = $playerDTO->validate(self::VALID_POSITIONS);
+            if (!empty($validationErrors)) {
                 $notImportedPlayers[] = [
                     'row' => $rowNumber,
                     'data' => $row,
-                    'error' => implode(', ', $errors)
+                    'error' => implode(', ', $validationErrors)
                 ];
                 continue;
             }
 
             try {
-                $player = new Player();
-                $player->setFirstName($row[0]);
-                $player->setLastName($row[1]);
-                $player->setPosition($row[2]);
-                $player->setTeam($row[3]);
-                $player->setAge((int) $row[4]);
+                $player = $this->createPlayerFromDTO($playerDTO);
+                $entityErrors = $this->validator->validate($player);
                 
-                $validationErrors = $this->validator->validate($player);
-                
-                if (count($validationErrors) > 0) {
-                    $errorMessages = [];
-                    foreach ($validationErrors as $error) {
-                        $errorMessages[] = $error->getPropertyPath() . ': ' . $error->getMessage();
-                    }
+                if (count($entityErrors) > 0) {
+                    $errorMessages = $this->formatValidationErrors($entityErrors);
                     
                     $notImportedPlayers[] = [
                         'row' => $rowNumber,
@@ -171,17 +151,70 @@ class PlayerService
             }
         }
         
+
         if ($persistInDatabase && count($importedPlayers) > 0) {
             $this->entityManager->flush();
         }
 
-        return [
-            'importedPlayers' => $importedPlayers, 
-            'notImportedPlayers' => $notImportedPlayers,
-            'importedCount' => count($importedPlayers),
-            'notImportedCount' => count($notImportedPlayers),
-            'totalRows' => count($rows)
-        ];
+        $resultDTO = new ImportResultDTO(
+            $importedPlayers, 
+            $notImportedPlayers, 
+            count($rows),
+            $persistInDatabase
+        );
+        
+        return $resultDTO->toArray();
+    }
+    
+    /**
+     * 
+     * @param UploadedFile 
+     * @return array 
+     */
+    private function loadExcelFile(UploadedFile $file): array
+    {
+        $tempFilePath = sys_get_temp_dir() . '/' . uniqid() . '.xlsx';
+        $file->move(dirname($tempFilePath), basename($tempFilePath));
+        
+        $spreadsheet = IOFactory::load($tempFilePath);
+        $worksheet = $spreadsheet->getActiveSheet();
+        $rows = $worksheet->toArray();
+        
+        unlink($tempFilePath);
+        
+        return $rows;
+    }
+    
+    /**
+     * 
+     * @param PlayerImportDTO 
+     * @return Player 
+     */
+    private function createPlayerFromDTO(PlayerImportDTO $dto): Player
+    {
+        $player = new Player();
+        $player->setFirstName($dto->getFirstName());
+        $player->setLastName($dto->getLastName());
+        $player->setPosition($dto->getPosition());
+        $player->setTeam($dto->getTeam());
+        $player->setAge($dto->getAge());
+        
+        return $player;
+    }
+    
+    /**
+     * 
+     * @param \Symfony\Component\Validator\ConstraintViolationListInterface 
+     * @return array 
+     */
+    private function formatValidationErrors($errors): array
+    {
+        $errorMessages = [];
+        foreach ($errors as $error) {
+            $errorMessages[] = $error->getPropertyPath() . ': ' . $error->getMessage();
+        }
+        
+        return $errorMessages;
     }
 }
  

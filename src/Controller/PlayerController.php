@@ -122,35 +122,47 @@ class PlayerController extends AbstractController
     #[Route('/players/import', name: 'player_import', methods: ['POST'])]
     public function import(Request $request): JsonResponse
     {
-
+        /** @var UploadedFile|null $file */
         $file = $request->files->get('file');
     
         if (!$file) {
-            return new JsonResponse(['message' => 'No file uploaded'], Response::HTTP_BAD_REQUEST);
+            return new JsonResponse([
+                'success' => false,
+                'message' => 'No file uploaded'
+            ], Response::HTTP_BAD_REQUEST);
         }
     
         if ($file->getClientMimeType() !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-            return new JsonResponse(['message' => 'Invalid file type. Please upload an XLSX file'], Response::HTTP_BAD_REQUEST);
+            return new JsonResponse([
+                'success' => false,
+                'message' => 'Invalid file type. Please upload an XLSX file'
+            ], Response::HTTP_BAD_REQUEST);
         }
     
         try {
-
             $persistInDatabase = filter_var($request->query->get('persistInDatabase', 'false'), FILTER_VALIDATE_BOOLEAN);
-
             $result = $this->playerService->importPlayersFromXlsx($file, $persistInDatabase);
-            
-            $importedCount = count($result['importedPlayers']);
-            $notImportedCount = count($result['notImportedPlayers']);
+            $importedCount = $result['importedCount'];
+            $notImportedCount = $result['notImportedCount'];
+            $totalRows = $result['totalRows'];
+            $notImportedDetails = [];
+            foreach ($result['notImportedPlayers'] as $player) {
+                $notImportedDetails[] = [
+                    'row' => $player['row'],
+                    'data' => array_values($player['data']), 
+                    'error' => $player['error']
+                ];
+            }
             
             return new JsonResponse([
                 'success' => true,
                 'message' => $persistInDatabase 
-                    ? "Successfully imported {$importedCount} players to database" 
-                    : "Validation complete: {$importedCount} players valid, {$notImportedCount} players invalid",
-                'importedPlayers' => $result['importedPlayers'],
-                'notImportedPlayers' => $result['notImportedPlayers'],
-                'importedPlayersCount' => $importedCount,
-                'notImportedPlayersCount' => $notImportedCount
+                    ? "Import terminé: {$importedCount} joueurs importés, {$notImportedCount} joueurs rejetés sur {$totalRows} lignes traitées" 
+                    : "Validation terminée: {$importedCount} joueurs valides, {$notImportedCount} joueurs invalides sur {$totalRows} lignes analysées",
+                'importedCount' => $importedCount,
+                'notImportedCount' => $notImportedCount,
+                'totalRows' => $totalRows,
+                'notImportedPlayers' => $notImportedDetails
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             return new JsonResponse([
